@@ -1,0 +1,29 @@
+{
+  "hourly_rate": 110,
+  "hours_worked": 40,
+  "taxes": {
+    "federal_income": 0.006,
+    "state_income": 0.0,
+    "local_income": 0.0
+  },
+  "fica": {
+    "social_security": 0.0479,
+    "medicare": 0.0125,
+    "state_disability_insurance_tax": 0.0,
+    "state_unemployment_insurance_tax": 0.0,
+    "state_family_leave_insurance_tax": 0.0,
+    "state_workers_compensation_insurance_tax": 0.0
+  },
+  "pre_tax_deductions": {
+    "medical_insurance": 0.1324,
+    "dental_coverage": 0.0045,
+    "vision_insurance": 0.0007,
+    "401k": 0.0,
+    "long_term_disability_insurance": 0.0,
+    "life_insurance": 0.0,
+    "commuter_plan": 0.0,
+    "fsa": 0.0,
+    "hsa": 0.0
+  },
+  "post_tax_deductions": 0.0
+}

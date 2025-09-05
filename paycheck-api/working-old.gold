@@ -1,0 +1,160 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"math"
+	"net/http"
+	"strings"
+)
+
+type Taxes struct {
+	FederalIncome float64 `json:"federal_income"`
+	StateIncome   float64 `json:"state_income"`
+	LocalIncome   float64 `json:"local_income"`
+}
+
+type Fica struct {
+	SocialSecurity                      float64 `json:"social_security"`
+	Medicare                            float64 `json:"medicare"`
+	StateDisabilityInsuranceTax         float64 `json:"state_disability_insurance_tax"`
+	StateUnemploymentInsuranceTax       float64 `json:"state_unemployment_insurance_tax"`
+	StateFamilyLeaveInsuranceTax        float64 `json:"state_family_leave_insurance_tax"`
+	StateWorkersCompensationInsuranceTax float64 `json:"state_workers_compensation_insurance_tax"`
+}
+
+type PreTaxDeductions struct {
+	MedicalInsurance            float64 `json:"medical_insurance"`
+	DentalCoverage              float64 `json:"dental_coverage"`
+	VisionInsurance             float64 `json:"vision_insurance"`
+	Four01k                     float64 `json:"401k"`
+	LongTermDisabilityInsurance float64 `json:"long_term_disability_insurance"`
+	LifeInsurance               float64 `json:"life_insurance"`
+	CommuterPlan                float64 `json:"commuter_plan"`
+	FSA                         float64 `json:"fsa"`
+	HSA                         float64 `json:"hsa"`
+}
+
+type Input struct {
+	HourlyRate        float64          `json:"hourly_rate"`
+	HoursWorked       float64          `json:"hours_worked"`
+	Taxes             Taxes            `json:"taxes"`
+	Fica              Fica             `json:"fica"`
+	PreTaxDeductions  PreTaxDeductions `json:"pre_tax_deductions"`
+	PostTaxDeductions float64          `json:"post_tax_deductions"`
+}
+
+func addCommas(num string) string {
+	if len(num) <= 3 {
+		return num
+	}
+	return addCommas(num[:len(num)-3]) + "," + num[len(num)-3:]
+}
+
+func formatDollar(amount float64) string {
+	rounded := math.Round(amount)
+	str := fmt.Sprintf("%.0f", rounded)
+	return "$" + addCommas(str)
+}
+
+func formatPercent(rate float64) string {
+	return fmt.Sprintf("%.2f%%", rate*100)
+}
+
+func handler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var input Input
+	err := json.NewDecoder(r.Body).Decode(&input)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	gross := input.HourlyRate * input.HoursWorked
+	grossAmount := math.Round(gross)
+
+	// Taxes
+	federalAmount := math.Round(input.Taxes.FederalIncome * gross)
+	stateIncomeAmount := math.Round(input.Taxes.StateIncome * gross)
+	localIncomeAmount := math.Round(input.Taxes.LocalIncome * gross)
+	taxesTotalAmount := federalAmount + stateIncomeAmount + localIncomeAmount
+	taxesTotalRate := input.Taxes.FederalIncome + input.Taxes.StateIncome + input.Taxes.LocalIncome
+
+	// FICA
+	ssAmount := math.Round(input.Fica.SocialSecurity * gross)
+	medicareAmount := math.Round(input.Fica.Medicare * gross)
+	sdiAmount := math.Round(input.Fica.StateDisabilityInsuranceTax * gross)
+	suiAmount := math.Round(input.Fica.StateUnemploymentInsuranceTax * gross)
+	sfliAmount := math.Round(input.Fica.StateFamilyLeaveInsuranceTax * gross)
+	swciAmount := math.Round(input.Fica.StateWorkersCompensationInsuranceTax * gross)
+	ficaTotalAmount := ssAmount + medicareAmount + sdiAmount + suiAmount + sfliAmount + swciAmount
+	ficaTotalRate := input.Fica.SocialSecurity + input.Fica.Medicare + input.Fica.StateDisabilityInsuranceTax +
+		input.Fica.StateUnemploymentInsuranceTax + input.Fica.StateFamilyLeaveInsuranceTax + input.Fica.StateWorkersCompensationInsuranceTax
+
+	// Pre-Tax
+	medicalAmount := math.Round(input.PreTaxDeductions.MedicalInsurance * gross)
+	dentalAmount := math.Round(input.PreTaxDeductions.DentalCoverage * gross)
+	visionAmount := math.Round(input.PreTaxDeductions.VisionInsurance * gross)
+	four01kAmount := math.Round(input.PreTaxDeductions.Four01k * gross)
+	ltdAmount := math.Round(input.PreTaxDeductions.LongTermDisabilityInsurance * gross)
+	lifeAmount := math.Round(input.PreTaxDeductions.LifeInsurance * gross)
+	commuterAmount := math.Round(input.PreTaxDeductions.CommuterPlan * gross)
+	fsaAmount := math.Round(input.PreTaxDeductions.FSA * gross)
+	hsaAmount := math.Round(input.PreTaxDeductions.HSA * gross)
+	preTotalAmount := medicalAmount + dentalAmount + visionAmount + four01kAmount + ltdAmount + lifeAmount + commuterAmount + fsaAmount + hsaAmount
+	preTotalRate := input.PreTaxDeductions.MedicalInsurance + input.PreTaxDeductions.DentalCoverage + input.PreTaxDeductions.VisionInsurance +
+		input.PreTaxDeductions.Four01k + input.PreTaxDeductions.LongTermDisabilityInsurance + input.PreTaxDeductions.LifeInsurance +
+		input.PreTaxDeductions.CommuterPlan + input.PreTaxDeductions.FSA + input.PreTaxDeductions.HSA
+
+	// Post-Tax
+	postAmount := math.Round(input.PostTaxDeductions * gross)
+	postRate := input.PostTaxDeductions
+
+	// Take Home
+	totalDeductions := taxesTotalAmount + ficaTotalAmount + preTotalAmount + postAmount
+	takeHomeAmount := grossAmount - totalDeductions
+	takeHomePercent := (takeHomeAmount / grossAmount) * 100
+
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("Gross Paycheck\t%s\n", formatDollar(grossAmount)))
+	sb.WriteString(fmt.Sprintf("\tTaxes\t%s\t%s\n", formatPercent(taxesTotalRate), formatDollar(taxesTotalAmount)))
+	sb.WriteString("\t\tDetails\n")
+	sb.WriteString(fmt.Sprintf("\t\tFederal Income\t%s\t%s\n", formatPercent(input.Taxes.FederalIncome), formatDollar(federalAmount)))
+	sb.WriteString(fmt.Sprintf("\t\tState Income\t%s\t%s\n", formatPercent(input.Taxes.StateIncome), formatDollar(stateIncomeAmount)))
+	sb.WriteString(fmt.Sprintf("\t\tLocal Income\t%s\t%s\n", formatPercent(input.Taxes.LocalIncome), formatDollar(localIncomeAmount)))
+	sb.WriteString(fmt.Sprintf("\tFICA and State Insurance Taxes\t%s\t%s\n", formatPercent(ficaTotalRate), formatDollar(ficaTotalAmount)))
+	sb.WriteString("\t\tDetails\n")
+	sb.WriteString(fmt.Sprintf("\t\tSocial Security\t%s\t%s\n", formatPercent(input.Fica.SocialSecurity), formatDollar(ssAmount)))
+	sb.WriteString(fmt.Sprintf("\t\tMedicare\t%s\t%s\n", formatPercent(input.Fica.Medicare), formatDollar(medicareAmount)))
+	sb.WriteString(fmt.Sprintf("\t\tState Disability Insurance Tax\t%s\t%s\n", formatPercent(input.Fica.StateDisabilityInsuranceTax), formatDollar(sdiAmount)))
+	sb.WriteString(fmt.Sprintf("\t\tState Unemployment Insurance Tax\t%s\t%s\n", formatPercent(input.Fica.StateUnemploymentInsuranceTax), formatDollar(suiAmount)))
+	sb.WriteString(fmt.Sprintf("\t\tState Family Leave Insurance Tax\t%s\t%s\n", formatPercent(input.Fica.StateFamilyLeaveInsuranceTax), formatDollar(sfliAmount)))
+	sb.WriteString(fmt.Sprintf("\t\tState Workers Compensation Insurance Tax\t%s\t%s\n", formatPercent(input.Fica.StateWorkersCompensationInsuranceTax), formatDollar(swciAmount)))
+	sb.WriteString(fmt.Sprintf("\tPre-Tax Deductions\t%s\t%s\n", formatPercent(preTotalRate), formatDollar(preTotalAmount)))
+	sb.WriteString("\t\tDetails\n")
+	sb.WriteString(fmt.Sprintf("\t\tMedical Insurance\t%s\t%s\n", formatPercent(input.PreTaxDeductions.MedicalInsurance), formatDollar(medicalAmount)))
+	sb.WriteString(fmt.Sprintf("\t\tDental Coverage\t%s\t%s\n", formatPercent(input.PreTaxDeductions.DentalCoverage), formatDollar(dentalAmount)))
+	sb.WriteString(fmt.Sprintf("\t\tVision Insurance\t%s\t%s\n", formatPercent(input.PreTaxDeductions.VisionInsurance), formatDollar(visionAmount)))
+	sb.WriteString(fmt.Sprintf("\t\t401(k)\t%s\t%s\n", formatPercent(input.PreTaxDeductions.Four01k), formatDollar(four01kAmount)))
+	sb.WriteString(fmt.Sprintf("\t\tLong Term Disability Insurance\t%s\t%s\n", formatPercent(input.PreTaxDeductions.LongTermDisabilityInsurance), formatDollar(ltdAmount)))
+	sb.WriteString(fmt.Sprintf("\t\tLife Insurance\t%s\t%s\n", formatPercent(input.PreTaxDeductions.LifeInsurance), formatDollar(lifeAmount)))
+	sb.WriteString(fmt.Sprintf("\t\tCommuter Plan\t%s\t%s\n", formatPercent(input.PreTaxDeductions.CommuterPlan), formatDollar(commuterAmount)))
+	sb.WriteString(fmt.Sprintf("\t\tFSA\t%s\t%s\n", formatPercent(input.PreTaxDeductions.FSA), formatDollar(fsaAmount)))
+	sb.WriteString(fmt.Sprintf("\t\tHSA\t%s\t%s\n", formatPercent(input.PreTaxDeductions.HSA), formatDollar(hsaAmount)))
+	sb.WriteString(fmt.Sprintf("\tPost-Tax Deductions\t%s\t%s\n", formatPercent(postRate), formatDollar(postAmount)))
+	sb.WriteString(fmt.Sprintf("\tTake Home Salary\t%.2f%%\t%s", takeHomePercent, formatDollar(takeHomeAmount)))
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.Write([]byte(sb.String()))
+}
+
+func main() {
+	http.HandleFunc("/calculate", handler)
+	fmt.Println("Server starting on :8080")
+	http.ListenAndServe(":8080", nil)
+}
